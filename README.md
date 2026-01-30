@@ -1,7 +1,7 @@
-### Go Channels cheatsheet
+# Go Channels cheatsheet
 This is really simple cheatsheet to understand how to use correctly channels with goroutines in a Go.
 
-#### Basic theory
+## Go concurrency bare minimum
 Let's consider a simple example of program with goroutine:
 ```go
 func main() {
@@ -181,9 +181,12 @@ func main() {
 ```
 _As a note_: As you may see we did not use any _WaitGroup_ for synchronization, b/c channel already having blocking behavior
 
-#### Go channel axioms
+**Problems to exercise** (see full list below):
+- `concstart`
 
-There are axioms of **non-buffered** channels:
+## Go channel axioms
+
+### There are axioms of **non-buffered** channels:
 
 | Ops   | Open                                  | Closed            | Not init (nil channel) |
 |-------|---------------------------------------|-------------------|------------------------|
@@ -206,6 +209,7 @@ _(additionally)_ There are axioms of **read-only** channels:
 _(additionally)_ There are axioms of **write-only** channels:
 - Read - compile error
 
+### Examples
 Let's ge examples on non-buffered channel axioms.
 
 - write to nil channel -> deadlock
@@ -497,18 +501,354 @@ result:
 13
 14
 ```
-As a note: since in according to "generator" we must not have any blocking operations, we wrap up `wg.Wait()`/`close(ch)` into separate goroutine as well.
+As a note: since in according to "generator" we must not have any blocking operations in the function, so we wrap up `wg.Wait()`/`close(ch)` into separate goroutine as well.
 
-#### Channel interview questions
-- [Basic theory] `concstart` - you have a function running between 1 and N seconds. Run this function concurrently M times
+As a note: we do not need to use construct:
+```go
+for {
+    v, ok := <-ch
+    if !ok {
+        break
+    }
+	...
+}
+```
+We can just use a `range` on the channel to pull from it as:
+```go
+for v := range ch {
+    fmt.Println(v)
+}
+```
+In case of using range you MUST close a channel, or you will get deadlock.
+
+### Select
+Let's make a simplest _select_ program and run it:
+```go
+func main() {
+	select {}
+}
+```
+result:
+```ascii
+fatal error: all goroutines are asleep - deadlock!
+```
+As you may see - **select** is a **blocking** operator.
+
+Select allows you to read from either one channel - using select you can make a switch between channels.
+```go
+func main() {
+	ch1 := make(chan int)
+	ch2 := make(chan int)
+	
+	select {
+	case v := <-ch1:
+		fmt.Println("ch1: ", v)
+	case v := <-ch2:
+		fmt.Println("ch2: ", v)
+	}
+}
+```
+If we run this program now we will get deadlock b/c `select`will iterate through all blocking operations (two in our case) and check they all blocked and throws deadlock (b/c no any writer to corresponding channel).
+Let's write into one channel any value:
+```go
+func main() {
+	ch1 := make(chan int)
+	ch2 := make(chan int)
+
+	go func() {
+		ch1 <- 1
+	}()
+	
+	select {
+	case v := <-ch1:
+		fmt.Println("ch1: ", v)
+	case v := <-ch2:
+		fmt.Println("ch2: ", v)
+	}
+}
+```
+result:
+```ascii
+ch1:  1
+
+Process finished with the exit code 0
+```
+so we printed value and exited program what means - `select` **works one time** and get **case first which was unlocked first**. 
+If we unlocked first channel 1, `select` reads from channel 1 and exited select.
+
+How to make `select` non-blocking? We can define `default` on the select to make it non-blocking:
+```go
+func main() {
+	ch1 := make(chan int)
+	ch2 := make(chan int)
+
+	select {
+	case v := <-ch1:
+		fmt.Println("ch1: ", v)
+	case v := <-ch2:
+		fmt.Println("ch2: ", v)
+	default:
+		fmt.Println("select is non-blocking now")
+	}
+}
+```
+result:
+```ascii
+select is non-blocking now
+
+Process finished with the exit code 0
+```
+
+Let's run this code:
+```go
+func main() {
+	ch1 := make(chan int)
+	ch2 := make(chan int)
+
+	go func() {
+		ch1 <- 1
+	}()
+	
+	select {
+	case v := <-ch1:
+		fmt.Println("ch1: ", v)
+	case v := <-ch2:
+		fmt.Println("ch2: ", v)
+	default:
+		fmt.Println("select is non-blocking now")
+	}
+}
+```
+Do we assume to get result as correct?
+```ascii
+ch1:  1
+
+Process finished with the exit code 0
+```
+However, we're really getting again:
+```ascii
+select is non-blocking now
+
+Process finished with the exit code 0
+```
+B/c our goroutine was not put scheduler for a run before program is exited. To make this program working as expected we can just put Sleep in front of `select`.
+That will goroutine and get result as we expect:
+```go
+func main() {
+	ch1 := make(chan int)
+	ch2 := make(chan int)
+
+	go func() {
+		ch1 <- 1
+	}()
+
+	time.Sleep(1 * time.Second)
+
+	select {
+	case v := <-ch1:
+		fmt.Println("ch1: ", v)
+	case v := <-ch2:
+		fmt.Println("ch2: ", v)
+	default:
+		fmt.Println("select is non-blocking now")
+	}
+}
+```
+```ascii
+ch1:  1
+
+Process finished with the exit code 0
+```
+If we want to leave `select` not by `default` but by timeout we can use `time.After` in the case:
+```go
+func main() {
+	ch1 := make(chan int)
+	ch2 := make(chan int)
+
+	select {
+	case v := <-ch1:
+		fmt.Println("ch1: ", v)
+	case v := <-ch2:
+		fmt.Println("ch2: ", v)
+	case <-time.After(1 * time.Second):
+		fmt.Println("timeout")
+	}
+}
+```
+```ascii
+timeout
+
+Process finished with the exit code 0
+```
+We also can leave by timer:
+```go
+func main() {
+	ch1 := make(chan int)
+	ch2 := make(chan int)
+
+	timer := time.NewTimer(time.Millisecond * 100)
+	select {
+	case v := <-ch1:
+		fmt.Println("ch1: ", v)
+	case v := <-ch2:
+		fmt.Println("ch2: ", v)
+	case <-time.After(1 * time.Second):
+		fmt.Println("timeout")
+	case <-timer.C:
+		fmt.Println("timer expired")
+	}
+}
+```
+```go
+timer expired
+
+Process finished with the exit code 0
+```
+Leave by context:
+```go
+func main() {
+	ch1 := make(chan int)
+	ch2 := make(chan int)
+
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+
+	select {
+	case v := <-ch1:
+		fmt.Println("ch1: ", v)
+	case v := <-ch2:
+		fmt.Println("ch2: ", v)
+	case <-ctx.Done():
+		fmt.Println("timeout")
+	}
+}
+```
+```ascii
+timeout
+
+Process finished with the exit code 0 
+```
+
+How all three `after`/`timer`/`context` work? They use a same pattern to close channel after meeting some condition. Let's make our custom `After`:
+```go
+func main() {
+	ch1 := make(chan int)
+	ch2 := make(chan int)
+
+	ch3 := make(chan int)
+	go func() {
+		ch3 <- 3
+		close(ch3)
+	}()
+	//close(ch3)
+
+	select {
+	case v := <-ch1:
+		fmt.Println("ch1: ", v)
+	case v := <-ch2:
+		fmt.Println("ch2: ", v)
+	case v := <-ch3:
+		fmt.Println("ch3: ", v)
+	}
+}
+```
+```go
+ch3:  3
+
+Process finished with the exit code 0
+```
+
+What the best way to leave `select`? **CONTEXT**
+
+Let's consider a simple program  with `select`:
+```go
+func main() {
+	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Millisecond)
+	defer cancel()
+
+	ch := make(chan int)
+	go func() {
+		for i := range 10 * 10 * 10 * 10 * 10 {
+			ch <- i
+		}
+		close(ch)
+	}()
+
+	for {
+		select {
+		case v, ok := <-ch:
+			if !ok {
+				return
+			}
+			fmt.Println("ch: ", v)
+		case <-ctx.Done():
+			return
+		}
+	}
+}
+```
+program creates channel, writes N values into it and await processing with a `select` or exit by context cancellation. However context cancellation itself does not
+cancel goroutine what create **goroutine leak**.
+To avoid let's also propagate context cancellation through `select` into goroutine.
+```go
+func main() {
+	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Millisecond)
+	defer cancel()
+
+	ch := make(chan int)
+	go func() {
+		for i := range 10 * 10 * 10 * 10 * 10 {
+			select {
+			case ch <- i:
+			case <-ctx.Done():
+				return
+			}
+		}
+		close(ch)
+	}()
+
+	for {
+		select {
+		case v, ok := <-ch:
+			if !ok {
+				return
+			}
+			fmt.Println("ch: ", v)
+		case <-ctx.Done():
+			return
+		}
+	}
+}
+```
+you can run both code snippets to see the difference.
+
+**Problems to exercise** (see full list below):
+- `pipeline`
+- `nworkers`
+- `longrunner`
+- `processdata`
+- `processdata_with_context`
+
+#### Problems to exercise
+- _Easy_ [Go concurrency bare minimum] `concstart` - You have a function running between 0 and N seconds. Run this function concurrently M times
 and print out how many seconds runs main and how many seconds run all functions in parallel.
     - Solution 1 (with `WaitGroup`) - `./concstart/wg`
     - Solution 2 (with `channel`) - `./concstart/ch`
-- [Go channel axioms]
+- _Medium_ [Go channel axioms] `pipeline` - Make 3 functions: _writer_ - generates numbers from 0 to 20, _doubler_ - multiplies numbers on 2 with sleep of 500ms simulating some IO-bound work,
+_reader_ - reads and prints out on the screen. All functions must be implemented concurrent way and synced accordingly.
+- _Easy_ [Go channel axioms] `nworkers` - Create channel and create M goroutine (2,3,4...) writing into channel, then create N different goroutines (2,3,4...) reading from the channel.
+- _Easy_ [Go channel axioms] `longrunner` - You have a function with undefined behavior - it can work in the range between 1 and 100 seconds. make a wrapper for this function
+to break execution if it takes more than 3 seconds and return error.
+- _Medium_ [Go channel axioms] `processdata` - You have a function to process data which for simplicity takes an integer number K and returns K * 2 after some wait (let's say it awaits between 0 and 10 seconds).
+ Write data (10 numbers as example) into some buffer concurrently and then process data in parallel with N number of workers.
+- _Hard_ [Go channel axioms] `processdata_with_context` - You have a function to process data which for simplicity takes an integer number K and returns K * 2 after some wait (let's say it awaits between 0 and 10 seconds). 
+write data (10 numbers as example) into some buffer concurrently and then process data in parallel with N number of workers, every process should run no longer than M seconds (5 by example) and print out time of execution.
+Please implement possible cancellation with timeout context.
 
 #### References
 - [1] Abandoned but still beautiful blog of Dmitry Vyukov - https://sites.google.com/site/1024cores/home
 - [2] Go Scheduler concepts by Dmitry Vyukov on Hydra conf - https://www.youtube.com/watch?v=-K11rY57K7k 
 - [3] Go `WaitGroup` - https://github.com/golang/go/blob/master/src/sync/waitgroup.go
 - [4] Go `channel` - https://go.dev/src/runtime/chan.go
-- [5] Go channel axioms - https://dave.cheney.net/2014/03/19/channel-axioms
+- [5] Go `select` - https://go.dev/src/runtime/select.go
+- [6] Go channel axioms - https://dave.cheney.net/2014/03/19/channel-axioms

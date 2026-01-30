@@ -8,12 +8,12 @@ import (
 )
 
 /*
-you have a function running between 1 and N seconds. Run this function concurrently M times and print out how many seconds runs main and how many seconds run all functions in parallel.
+you have a function running between 0 and N seconds. Run this function concurrently M times and print out how many seconds runs main and how many seconds run all functions in parallel.
 */
 
 // run between 1 and 5s
 func randomRun() int {
-	runTime := rand.Intn(1 + 5)
+	runTime := rand.Intn(5)
 	time.Sleep(time.Duration(runTime) * time.Second)
 	return runTime
 }
