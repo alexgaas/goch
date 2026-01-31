@@ -186,7 +186,7 @@ _As a note_: As you may see we did not use any _WaitGroup_ for synchronization, 
 
 ## Go channel axioms
 
-### There are axioms of **non-buffered** channels:
+### There are axioms of (**unbuffered**) channel:
 
 | Ops   | Open                                  | Closed            | Not init (nil channel) |
 |-------|---------------------------------------|-------------------|------------------------|
@@ -194,19 +194,13 @@ _As a note_: As you may see we did not use any _WaitGroup_ for synchronization, 
 | Write | lock (blocked until consumer reads)   | panic             | deadlock               |
 | Close | close channel                         | panic             | panic                  |
 
-There are axioms of **buffered** channels:
+_As a note_: additionally you can mark channel as read-only (`<- chan int`) or write-only (`chan <- int`), then following additional restrictions happen on the compile level:
 
-| Ops   | Open and filled                       | Open and not filled | Closed and not empty |
-|-------|---------------------------------------|---------------------|----------------------|
-| Read  | lock (blocked until publisher writes) | reads value         | reads value          |
-| Write | lock (blocked until consumer reads)   | writes value        | panic                |
-
-
-_(additionally)_ There are axioms of **read-only** channels:
+for **read-only** channels:
 - Read - compile error
 - Write - compile error
 
-_(additionally)_ There are axioms of **write-only** channels:
+for **write-only** channels:
 - Read - compile error
 
 ### Examples
@@ -829,21 +823,137 @@ you can run both code snippets to see the difference.
 - `processdata`
 - `processdata_with_context`
 
-#### Problems to exercise
+### Buffered channels
+Uber Go style guide dictates to not use buffered channels (see ref 7 below):
+```ascii
+Channel Size is One or None
+
+Channels should usually have a size of one or be unbuffered. By default, channels are unbuffered and have a size of zero.
+Any other size must be subject to a high level of scrutiny. Consider how the size is determined, what prevents the channel 
+from filling up under load and blocking writers, and what happens when this occurs.
+```
+Bad	by Uber style guide:
+```go
+// Ought to be enough for anybody!
+c := make(chan int, 64)
+```
+
+Good by Uber style guide:
+```go
+// Size of one
+c := make(chan int, 1) // or
+// Unbuffered channel, size of zero
+c := make(chan int)
+```
+
+Buffered channel works as unbuffered channel except:
+- **WRITE LOCK** on the channel happens only when **BUFFER** is **FULLY FILLED**
+- **READ LOCK** on the channel happens when **BUFFER** is **EMPTY**
+
+Buffered channel does not have any OTHER LOCKS what means we do not have synchronization. Buffered channel does not make a Join point as it does unbuffered channel:
+```ascii
+        fork->
+              \
+g0(main) ----> go g1 --------> println ----> exit
+                \ 
+                g1 --------------------------------> println
+```
+
+Let's make a simple program with unbuffered channel:
+```go
+func main() {
+	ch := make(chan int)
+	go func() {
+		// read
+		for range 3 {
+			v := <-ch
+			fmt.Println(v)
+		}
+		close(ch)
+	}()
+    // write
+	ch <- 1
+	ch <- 2
+	ch <- 3
+}
+```
+result:
+```ascii1
+2
+3
+
+Process finished with the exit code 0
+```
+
+Now let's change unbuffered to buffered with a size 3:
+```go
+func main() {
+	ch := make(chan int, 3)
+	go func() {
+		// read
+		for range 3 {
+			v := <-ch
+			fmt.Println(v)
+		}
+	}()
+    // write
+	ch <- 1
+	ch <- 2
+	ch <- 3
+}
+```
+result:
+```ascii
+
+Process finished with the exit code 0
+```
+As you may see synchronization is no longer working expected for unbuffered channel way. Since writer had enough slots to fill up buffer it's not blocked itself and exited program before scheduler put reading goroutine to work.
+If we add sleep in the end of program or increase number of buffer and writes into buffer program will read all or part of data:
+```go
+func main() {
+	ch := make(chan int, 10000)
+	go func() {
+		for range 3 {
+			v := <-ch
+			fmt.Println(v)
+		}
+	}()
+
+	for i := range 10000 {
+		ch <- i
+	}
+}
+```
+```ascii
+0
+1
+2
+3
+4
+...
+```
+
+### Problems to exercise
 - _Easy_ [Go concurrency bare minimum] `concstart` - You have a function running between 0 and N seconds. Run this function concurrently M times
 and print out how many seconds runs main and how many seconds run all functions in parallel.
-    - Solution 1 (with `WaitGroup`) - `./concstart/wg`
-    - Solution 2 (with `channel`) - `./concstart/ch`
+    - Solution 1 (with `WaitGroup`) - `./concstart/wg/main.go`
+    - Solution 2 (with `channel`) - `./concstart/ch/main.go`
 - _Medium_ [Go channel axioms] `pipeline` - Make 3 functions: _writer_ - generates numbers from 0 to 20, _doubler_ - multiplies numbers on 2 with sleep of 500ms simulating some IO-bound work,
 _reader_ - reads and prints out on the screen. All functions must be implemented concurrent way and synced accordingly.
+    - Solution: `./pipeline/main.go`
 - _Easy_ [Go channel axioms] `nworkers` - Create channel and create M goroutine (2,3,4...) writing into channel, then create N different goroutines (2,3,4...) reading from the channel.
+    - Solution: `./nworkers/main.go`
 - _Easy_ [Go channel axioms] `longrunner` - You have a function with undefined behavior - it can work in the range between 1 and 100 seconds. make a wrapper for this function
 to break execution if it takes more than 3 seconds and return error.
+    - Solution 1 (with `time.After`): `./longrunner/after/main.go`
+    - Solution 2 (with context): `./longrunner/context/main.go`
 - _Medium_ [Go channel axioms] `processdata` - You have a function to process data which for simplicity takes an integer number K and returns K * 2 after some wait (let's say it awaits between 0 and 10 seconds).
  Write data (10 numbers as example) into some buffer concurrently and then process data in parallel with N number of workers.
+    - Solution: `./processdata/main.go`
 - _Hard_ [Go channel axioms] `processdata_with_context` - You have a function to process data which for simplicity takes an integer number K and returns K * 2 after some wait (let's say it awaits between 0 and 10 seconds). 
 write data (10 numbers as example) into some buffer concurrently and then process data in parallel with N number of workers, every process should run no longer than M seconds (5 by example) and print out time of execution.
 Please implement possible cancellation with timeout context.
+    - Solution: `./processdata_with_context/main.go` 
 
 #### References
 - [1] Abandoned but still beautiful blog of Dmitry Vyukov - https://sites.google.com/site/1024cores/home
@@ -852,3 +962,4 @@ Please implement possible cancellation with timeout context.
 - [4] Go `channel` - https://go.dev/src/runtime/chan.go
 - [5] Go `select` - https://go.dev/src/runtime/select.go
 - [6] Go channel axioms - https://dave.cheney.net/2014/03/19/channel-axioms
+- [7] Uber Go style guide - buffered vs unbuffered - https://github.com/uber-go/guide/blob/master/style.md#channel-size-is-one-or-none
