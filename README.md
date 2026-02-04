@@ -964,14 +964,36 @@ func main() {
 ...
 ```
 
+Why would we need a buffered channel? 
+
+**Buffered channels are non-blocking for the sender as long as there's still room. This can increase responsiveness and throughput. 
+Sending several items on one buffered channel makes sure they are processed in the order in which they are sent.**
+As example:
+```go
+func main() {
+	ch := make(chan int, 3)
+
+	ch <- 1
+	fmt.Println("v 1 is written")
+	ch <- 2
+	fmt.Println("v 2 is written")
+	ch <- 3
+	fmt.Println("v 3 is written")
+
+	close(ch)
+
+	go func() {
+		time.Sleep(1 * time.Second)
+		for v := range ch {
+			fmt.Println("v ", v)
+		}
+	}()
+
+	time.Sleep(5 * time.Second)
+}
+```
+
 ## Goroutine leaks
-IN PROGRESS
-
-## Advanced channel patterns
-
-### Fan-in fan-out
-IN PROGRESS
-### Worker pool
 IN PROGRESS
 
 **Problems to exercise**:
@@ -999,6 +1021,7 @@ write data (10 numbers as example) into some buffer concurrently and then proces
 Please implement possible cancellation with timeout context.
     - Solution: `./processdata_with_context/main.go`
 - _Hard**_ [Advanced channel patterns] `fanin_fanout_workerpool` - Implement fan-in / fan-out and work pool both with context cancellation. Using metrics show advantage one above other if such as advantage is exist.
+    - Solution: `.fanin_fanout_workerpool/`
 
 ## References
 - [1] Abandoned but still beautiful blog of Dmitry Vyukov - https://sites.google.com/site/1024cores/home
@@ -1007,4 +1030,4 @@ Please implement possible cancellation with timeout context.
 - [4] Go `channel` - https://go.dev/src/runtime/chan.go
 - [5] Go `select` - https://go.dev/src/runtime/select.go
 - [6] Go channel axioms - https://dave.cheney.net/2014/03/19/channel-axioms
-- [7] Uber Go style guide - buffered vs unbuffered - https://github.com/uber-go/guide/blob/master/style.md#channel-size-is-one-or-none
+- [7] Uber Go style guide - buffered vs unbuffered channels - https://github.com/uber-go/guide/blob/master/style.md#channel-size-is-one-or-none

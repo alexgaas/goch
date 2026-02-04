@@ -1,48 +1,59 @@
 package main
 
-import "fmt"
+import (
+	"fmt"
+	"sync"
+)
 
-func main() {
+func generate() <-chan int {
 	ch := make(chan int)
+	wg := &sync.WaitGroup{}
 
-	/* WRITE */
-
-	// g1
+	wg.Add(1)
 	go func() {
-		for i := range 10 * 10 * 10 {
+		defer wg.Done()
+		for i := range 10 {
 			ch <- i
 		}
+	}()
+
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		for i := range 10 {
+			ch <- i + 10
+		}
+	}()
+
+	go func() {
+		wg.Wait()
 		close(ch)
 	}()
 
-	// g2
-	go func() {
-		for i := range 10 * 10 * 10 {
-			ch <- i * 7
-		}
-		close(ch)
-	}()
+	return ch
+}
 
-	/* READ */
+/*
+Create channel and create M goroutine (2,3,4...) writing into channel, then create N different goroutines (2,3,4...) reading from the channel.
+*/
+func main() {
+	ch := generate()
 
-	// g3
+	wg := &sync.WaitGroup{}
+	wg.Add(2)
 	go func() {
+		defer wg.Done()
 		for v := range ch {
-			fmt.Println("worker 1: ", v)
+			fmt.Println("reading g1: ", v)
 		}
 	}()
 
-	// g4
 	go func() {
+		defer wg.Done()
 		for v := range ch {
-			fmt.Println("worker 2: ", v)
+			fmt.Println("reading g2: ", v)
 		}
 	}()
 
-	for v := range ch {
-		fmt.Println("worker 3: ", v)
-	}
-	
-	fmt.Println()
-	fmt.Println("done...")
+	wg.Wait()
 }
