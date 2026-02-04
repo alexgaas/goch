@@ -21,7 +21,7 @@ g0(main) ----> go g1 ----> println ----> exit
                 \
                 g1 -----------------------------> println
 ```
-That happens b/c we do not control when goroutine start in the program - Go scheduler does it for us.
+That happens b/c we do not control when goroutine start in the program - Go scheduler does it for us (some details about how scheduler works you can find looking into ref [2]).
 
 ----
 Note: If we want any concurrent program on Go to run correctly, we have to:
@@ -32,7 +32,7 @@ Note: If we want any concurrent program on Go to run correctly, we have to:
 
 ### synchronize goroutines
 
-Model of Go concurrency is based off **Fork/Join** approach. To address problem we had before and start our goroutine we need to add **Join** point into our program - e.g. synchronize goroutines. 
+Model of Go concurrency is based off **Fork/Join** approach (it is also called parallel divide and conquer - see ref [1] below). To address problem we had before and start our goroutine we need to add **Join** point into our program - e.g. synchronize goroutines. 
 ```ascii
         fork->
               \
@@ -55,7 +55,7 @@ func main() {
 	fmt.Println("Hello World")
 }
 ```
-`WaitGroup` is a **counting semaphore** typically used to wait for a group of goroutines to finish.
+`WaitGroup` is a **counting semaphore** typically used to wait for a group of goroutines to finish (see [3]).
 
 result of this execution will be:
 ```ascii
@@ -162,7 +162,7 @@ After that really brief introduction to Go concurrency we finally ready to look 
 ```go
 ch := make(chan int)
 ```
-Channel is a high level data structure used as for synchronization and communications between goroutines.
+Channel is a high level data structure used as for synchronization and communications between goroutines (see [4]).
 
 Let's make a simple operation on the channel, will add into channel 1, and get from the channel 1 and print it out:
 ```go
@@ -222,6 +222,8 @@ for **read-only** channels:
 for **write-only** channels:
 - Read - compile error
 ----
+
+(also see [6] link - it though has only 4 idioms missing some channel states in favor of "more important")
 
 ### Examples
 Let's go through examples on the (non-buffered) channel axioms.
@@ -559,7 +561,7 @@ fatal error: all goroutines are asleep - deadlock!
 ```
 As you may see - **select** is a **blocking** operator.
 
-Select allows you to read from either one channel - using select you can make a switch between channels.
+Select allows you to read from either one channel - using select you can make a switch between channels (see link [5]).
 ```go
 func main() {
 	ch1 := make(chan int)
@@ -855,7 +857,7 @@ you can run both code snippets to see the difference.
 - `processdata_with_context`
 
 ## Buffered channels
-Uber Go style guide dictates to not use buffered channels (see ref 7 below):
+Uber Go style guide dictates to not use buffered channels (see ref [7] below):
 ```ascii
 Channel Size is One or None
 
@@ -994,7 +996,240 @@ func main() {
 ```
 
 ## Goroutine leaks
-IN PROGRESS
+Goroutine leak happens when result of goroutine work no longer need but goroutine keeps working and consume memory and CPU and other resources. 
+
+Let's make a simple example of goroutine leak:
+```go
+func leakyG() {
+	go func(){
+	    for {}	
+    }
+}
+```
+The goroutine from example would never be finished.
+
+Let's look on the example with "forgotten" reader / writer.
+Here is initial example:
+```go
+func main() {
+	ch := make(chan int)
+
+	// writer
+	go func() {
+		defer fmt.Println("writer is done")
+		for i := range 10 {
+			ch <- i
+		}
+	}()
+
+	// reader
+	go func() {
+		defer fmt.Println("reader is done")
+		for v := range ch {
+			fmt.Println("read", v)
+		}
+	}()
+
+	time.Sleep(1 * time.Second)
+}
+```
+run and:
+```ascii
+read 0
+read 1
+writer is done
+read 2
+```
+Writer is exited but reader is not b/c we did not close channel after writing.
+Let's address it:
+```go
+func main() {
+	ch := make(chan int)
+
+	// writer
+	go func() {
+		defer fmt.Println("writer is done")
+		for i := range 3 {
+			ch <- i
+		}
+		close(ch)
+	}()
+
+	// reader
+	go func() {
+		defer fmt.Println("reader is done")
+		for v := range ch {
+			fmt.Println("read", v)
+		}
+	}()
+
+	time.Sleep(1 * time.Second)
+}
+```
+and run:
+```ascii
+read 0
+read 1
+writer is done
+read 2
+reader is done
+```
+Great, now both are exited.
+
+Now let's emulate issue on the reader goroutine:
+```go
+func main() {
+	ch := make(chan int)
+
+	// writer
+	go func() {
+		defer fmt.Println("writer is done")
+		for i := range 3 {
+			ch <- i // oh, no writer is blocked now
+		}
+		close(ch)
+	}()
+
+	// reader
+	go func() {
+		defer fmt.Println("reader is done")
+		for v := range ch {
+			fmt.Println("read", v)
+			return // some issue on the reader
+		}
+	}()
+
+	time.Sleep(1 * time.Second)
+}
+```
+result:
+```ascii 
+read 0
+reader is done
+```
+Writer goroutine is leaked now. To avoid we can add cancellation context as we did before to prevent this:
+```go
+func main() {
+	ch := make(chan int)
+
+	ctx, cancel := context.WithCancel(context.Background())
+
+	// writer
+	go func() {
+		defer fmt.Println("writer is done")
+		for i := range 3 {
+			select {
+			case ch <- i:
+			case <-ctx.Done():
+				return
+			}
+		}
+		close(ch)
+	}()
+
+	// reader
+	go func() {
+		defer fmt.Println("reader is done")
+		for v := range ch {
+			fmt.Println("read", v)
+
+			cancel()
+			return // some issue on the reader
+		}
+	}()
+
+	time.Sleep(1 * time.Second)
+}
+```
+result:
+```go
+read 0
+reader is done
+writer is done
+```
+Nice, both goroutines are exited as we expect now. but what if we get a error on the writer now?
+```go
+func main() {
+	ch := make(chan int)
+
+	ctx, _ := context.WithCancel(context.Background())
+
+	// writer
+	go func() {
+		defer fmt.Println("writer is done")
+		for i := range 3 {
+			select {
+			case ch <- i:
+				return // some issue on the writer
+			case <-ctx.Done():
+				return
+			}
+		}
+		close(ch)
+	}()
+
+	// reader
+	go func() {
+		defer fmt.Println("reader is done")
+		for v := range ch {
+			fmt.Println("read", v)
+		}
+	}()
+
+	time.Sleep(1 * time.Second)
+}
+```
+result:
+```ascii 
+writer is done
+read 0
+```
+Now leak on the reader! that's b/c our was not closed yet - we close on the end of writer goroutine.
+If we do closing with _defer_ we can avoid this problem
+```go
+func main() {
+	ch := make(chan int)
+
+	ctx, _ := context.WithCancel(context.Background())
+
+	// writer
+	go func() {
+		defer close(ch)
+		defer fmt.Println("writer is done")
+		for i := range 3 {
+			select {
+			case ch <- i:
+				return // some issue on the writer
+			case <-ctx.Done():
+				return
+			}
+		}
+		//close(ch)
+	}()
+
+	// reader
+	go func() {
+		defer fmt.Println("reader is done")
+		for v := range ch {
+			fmt.Println("read", v)
+		}
+	}()
+
+	time.Sleep(1 * time.Second)
+}
+```
+result:
+```ascii
+writer is done
+read 0
+reader is done
+```
+
+----
+
+Note: use **defer** all time to close channel if it is possible.
+
+----
 
 **Problems to exercise**:
 - `fanin_fanout_workerpool`
@@ -1021,7 +1256,7 @@ write data (10 numbers as example) into some buffer concurrently and then proces
 Please implement possible cancellation with timeout context.
     - Solution: `./processdata_with_context/main.go`
 - _Hard**_ [Advanced channel patterns] `fanin_fanout_workerpool` - Implement fan-in / fan-out and work pool both with context cancellation. Using metrics show advantage one above other if such as advantage is exist.
-    - Solution: `.fanin_fanout_workerpool/`
+    - Solution: `./fanin_fanout_workerpool/cmd/main.go`
 
 ## References
 - [1] Abandoned but still beautiful blog of Dmitry Vyukov - https://sites.google.com/site/1024cores/home
