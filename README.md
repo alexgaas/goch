@@ -253,6 +253,14 @@ t := test{
 	ch: make(chan int),
 }
 ```
+or if you need to create array of channels:
+```go
+out := make([]chan int, numChans)
+for i := 0; i < numChans; i++ {
+    out[i] = make(chan int, numChans)
+}
+```
+
 - write to channel -> deadlock
 ```go
 func main() {
@@ -1255,6 +1263,8 @@ to break execution if it takes more than 3 seconds and return error.
 write data (10 numbers as example) into some buffer concurrently and then process data in parallel with N number of workers, every process should run no longer than M seconds (5 by example) and print out time of execution.
 Please implement possible cancellation with timeout context.
     - Solution: `./processdata_with_context/main.go`
+- _Medium_ [Advanced channel patterns] _tee pattern_ - Implement "tee" pattern - function what has one channel as input and N (same as an input one) channels as output. Please implement possible cancellation with timeout context.
+  - Solution: `./tee/main.go`
 - _Hard**_ [Advanced channel patterns] `fanin_fanout_workerpool` - Implement fan-in / fan-out and work pool both with context cancellation. Using metrics show advantage one above other if such as advantage is exist.
     - Solution: `./fanin_fanout_workerpool/cmd/main.go`
 
