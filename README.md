@@ -217,7 +217,7 @@ Note: additionally you can mark channel as read-only (`<- chan int`) or write-on
 
 for **read-only** channels:
 - Read - compile error
-- Write - compile error
+- Close - compile error
 
 for **write-only** channels:
 - Read - compile error
