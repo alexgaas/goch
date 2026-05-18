@@ -1,9 +1,9 @@
 # Go Channels cheatsheet
-This is really simple cheatsheet to understand how to use correctly channels with goroutines in a Go. This basic introduction does not assume 
-consideration of Go channels under the hood and instead of that focuses on the practical aspects of using channels on to production-ready services.
+This is a really simple cheatsheet to understand how to correctly use channels with goroutines in Go. This basic introduction does not assume 
+consideration of Go channels under the hood and instead focuses on the practical aspects of using channels in production-ready services.
 
 ## Go concurrency bare minimum
-Let's consider a simple example of program with goroutine:
+Let's consider a simple example of a program with a goroutine:
 ```go
 func main() {
 	go func() { // g1
@@ -12,7 +12,7 @@ func main() {
 	fmt.Println("Hello World")
 }
 ```
-If we run this program we would never see goroutine is started b/c exit from program happen before goroutine is really joined to _g0_: 
+If we run this program, we would never see the goroutine start because the program exits before the goroutine is really joined to _g0_: 
 
 ```ascii
         fork->
@@ -21,18 +21,18 @@ g0(main) ----> go g1 ----> println ----> exit
                 \
                 g1 -----------------------------> println
 ```
-That happens b/c we do not control when goroutine start in the program - Go scheduler does it for us (some details about how scheduler works you can find looking into ref [2]).
+That happens because we do not control when goroutines start in the program - the Go scheduler does it for us (some details about how the scheduler works can be found in ref [2]).
 
 ----
-Note: If we want any concurrent program on Go to run correctly, we have to:
+Note: If we want any concurrent program in Go to run correctly, we have to:
 - synchronize goroutines
-- prevent race / contention
-- address any possible goroutine leaks (will be considered in different topic)
+- prevent race conditions / contention
+- address any possible goroutine leaks (will be considered in a different topic)
 ----
 
 ### synchronize goroutines
 
-Model of Go concurrency is based off **Fork/Join** approach (it is also called parallel divide and conquer - see ref [1] below). To address problem we had before and start our goroutine we need to add **Join** point into our program - e.g. synchronize goroutines. 
+The Go concurrency model is based on the **Fork/Join** approach (it is also called parallel divide and conquer - see ref [1] below). To address the problem we had before and start our goroutine, we need to add a **Join** point into our program - i.e., synchronize goroutines. 
 ```ascii
         fork->
               \
@@ -40,7 +40,7 @@ g0(main) ----> go g1 --------> println ----> exit
                 \ -> join ^ 
                 g1 ----> println
 ```
-How would we do that sync (add join point) in the Go? We can add a **wait group**:
+How would we do that synchronization (add a join point) in Go? We can add a **wait group**:
 ```go
 func g1(wg *sync.WaitGroup) {
 	defer wg.Done()
@@ -57,7 +57,7 @@ func main() {
 ```
 `WaitGroup` is a **counting semaphore** typically used to wait for a group of goroutines to finish (see [3]).
 
-result of this execution will be:
+The result of this execution will be:
 ```ascii
 test
 Hello World
@@ -65,13 +65,13 @@ Hello World
 
 ----
 
-Note: please make you pass `WaitGroup` into function by reference. If you pass by value, wait group will be copied and never wait end of goroutine!
+Note: please make sure you pass the `WaitGroup` into functions by reference. If you pass by value, the wait group will be copied and will never wait for the goroutine to end!
 
 ----
 
 ### prevent race / contention
 
-Let's consider a contention problem when N goroutines trying to get and modify one variable in the memory.
+Let's consider a contention problem when N goroutines are trying to access and modify a single variable in memory.
 ```go
 func main() {
 	m := 0
@@ -87,7 +87,7 @@ func main() {
 	fmt.Println(m)
 }
 ```
-This program tries to increment one variable with N goroutines (1000 in our case). If we run program we'd get following result:
+This program tries to increment one variable with N goroutines (1000 in our case). If we run the program, we'd get the following result:
 ```ascii
 927
 ...
@@ -95,7 +95,7 @@ This program tries to increment one variable with N goroutines (1000 in our case
 ...
 946
 ```
-but not a 1000 as expect. The reason of that `m = m + 1` is not atomic operation, it consists of three operations: read m -> add one -> write m. 
+but not 1000 as expected. The reason is that `m = m + 1` is not an atomic operation; it consists of three operations: read m -> add one -> write m. 
 
 flow diagram:
 ```ascii
@@ -105,7 +105,7 @@ main g0 \ -> m = 0
         /
 m = 1, m != 2 as expected
 ```
-That is a classic case of data contention (or race). How would we address this problem? Most simple way would be to use **atomic** types:
+That is a classic case of data contention (or race). How would we address this problem? The simplest way would be to use **atomic** types:
 ```go
 func main() {
 	var m atomic.Int32
@@ -125,7 +125,7 @@ result:
 ```ascii
 1000
 ```
-Another option would be to use _Mutex_ - a mutual exclusion lock.
+Another option would be to use a _Mutex_ - a mutual exclusion lock.
 ```go
 func main() {
 	m := 0
@@ -149,28 +149,28 @@ result:
 ```ascii
 1000
 ```
-Advantage of mutex is obvious - in given moment of time only one goroutine may do set of instructions for you (but not only certain atomic type though!).
+The advantage of a mutex is obvious - at any given moment, only one goroutine may execute the protected set of instructions for you (not only for certain atomic types!).
 
 ----
 
-Note: if you have a few goroutines with separate r/w operations we can use _RWMutex_ instead of _Mutex_ to lock r/w ops separately.
+Note: If you have multiple goroutines with separate r/w operations, you can use _RWMutex_ instead of _Mutex_ to lock r/w operations separately.
 
 ----
 
 ### channel introduction
-After that really brief introduction to Go concurrency we finally ready to look on the _Channel_ example:
+After that brief introduction to Go concurrency, we are finally ready to look at a _Channel_ example:
 ```go
 ch := make(chan int)
 ```
-Channel is a high level data structure used as for synchronization and communications between goroutines (see [4]).
+A channel is a high-level data structure used for synchronization and communication between goroutines (see [4]).
 
-Let's make a simple operation on the channel, will add into channel 1, and get from the channel 1 and print it out:
+Let's perform a simple operation on a channel: we will add 1 into the channel, and get 1 from the channel and print it out:
 ```go
 func main() {
 	ch := make(chan int)
-	// Writing to channel won't be unlocked until anything will be read from channel 
-	ch <- 1 // since locked! here already 
-	v := <-ch // we get deadlock :)
+	// Writing to the channel will block until something is read from the channel 
+	ch <- 1 // blocks here!
+	v := <-ch // we get a deadlock :)
 	fmt.Println(v)
 }
 ```
@@ -178,10 +178,10 @@ result:
 ```ascii
 fatal error: all goroutines are asleep - deadlock!
 ```
-As you may see we got deadlock! We got it b/c operations of writing to channel and reading from channel are **blocking**! 
-Most important lesson of that must - channels made for data exchange/communications **between goroutines**.
+As you can see, we got a deadlock! We got it because operations of writing to a channel and reading from a channel are **blocking**! 
+The most important lesson is that channels are made for data exchange and communication **between goroutines**.
 
-Ok let's fix our code and print out 1 finally:
+Ok, let's fix our code and finally print 1:
 ```go
 func main() {
 	ch := make(chan int)
@@ -195,7 +195,7 @@ func main() {
 
 ----
 
-Note_: As you may see we did not use any _WaitGroup_ for synchronization, b/c channel already having blocking behavior
+Note: As you can see, we did not use any _WaitGroup_ for synchronization, because channels already have blocking behavior.
 
 ----
 
@@ -204,7 +204,7 @@ Note_: As you may see we did not use any _WaitGroup_ for synchronization, b/c ch
 
 ## Go channel axioms
 
-### There are axioms of (**unbuffered**) channel:
+### These are the axioms of (**unbuffered**) channels:
 
 | Ops   | Open                            | Closed                | Not init (nil channel) |
 |-------|---------------------------------|-----------------------|------------------------|
@@ -213,22 +213,22 @@ Note_: As you may see we did not use any _WaitGroup_ for synchronization, b/c ch
 | Close | close channel                   | panic                 | panic                  |
 
 ----
-Note: additionally you can mark channel as read-only (`<- chan int`) or write-only (`chan <- int`), then following additional restrictions happen on the compile level:
+Note: additionally, you can mark a channel as read-only (`<- chan int`) or write-only (`chan <- int`). Then, the following additional restrictions are enforced at the compile level:
 
 for **read-only** channels:
-- Read - compile error
+- Write - compile error
 - Close - compile error
 
 for **write-only** channels:
 - Read - compile error
 ----
 
-(also see [6] link - it though has only 4 idioms missing some channel states in favor of "more important")
+(See also the [6] link - it only has 4 idioms, missing some channel states in favor of "more important" ones)
 
 ### Examples
-Let's go through examples on the (non-buffered) channel axioms.
+Let's go through examples of the (non-buffered) channel axioms.
 
-- write to nil channel -> deadlock
+- write to a nil channel -> deadlock
 ```go
 func main() {
 	var ch chan int
@@ -239,11 +239,11 @@ result:
 ```ascii
 fatal error: all goroutines are asleep - deadlock!
 ```
-as outcome - you must create channel every time before use it:
+outcome - you must create a channel every time before using it:
 ```go
 ch := make(chan int)
 ```
-or if you use channel in the structure:
+or if you use a channel in a struct:
 ```go
 type test struct{
 	ch chan int
@@ -253,7 +253,7 @@ t := test{
 	ch: make(chan int),
 }
 ```
-or if you need to create array of channels:
+or if you need to create an array of channels:
 ```go
 out := make([]chan int, numChans)
 for i := 0; i < numChans; i++ {
@@ -261,7 +261,7 @@ for i := 0; i < numChans; i++ {
 }
 ```
 
-- write to channel -> deadlock
+- write to a channel -> deadlock
 ```go
 func main() {
 	ch := make(chan int)
@@ -272,8 +272,8 @@ result:
 ```ascii
 fatal error: all goroutines are asleep - deadlock!
 ```
-outcome - (channel does not have any reader) it's blocked until data read by any reader
-- write to channel in main goroutine, read from channel in same goroutine
+outcome - if the channel does not have any reader, it's blocked until data is read by a reader.
+- write to a channel in the main goroutine, and read from it in the same goroutine
 ```go
 func main() {
 	ch := make(chan int)
@@ -286,9 +286,9 @@ result:
 ```ascii
 fatal error: all goroutines are asleep - deadlock!
 ```
-outcome - we still blocked on the `ch <- 1`, we need any channel to read value from **different** goroutine. 
-**Non-buffered channels need to exchange data between goroutines.**
-- write to channel in different goroutine, read from channel in main goroutine
+outcome - we are still blocked on the `ch <- 1`. We need another goroutine to read the value from the channel. 
+**Non-buffered channels are used to exchange data between goroutines.**
+- write to a channel in a different goroutine, and read from it in the main goroutine
 ```go
 func main() {
 	ch := make(chan int)
@@ -303,7 +303,7 @@ result:
 ```ascii
 1
 ```
-- write to channel in different goroutine, read from channel in main goroutine twice
+- write to a channel in a different goroutine, and read from it in the main goroutine twice
 ```go
 func main() {
 	ch := make(chan int)
@@ -322,8 +322,8 @@ result:
 1
 fatal error: all goroutines are asleep - deadlock!
 ```
-outcome - second reading from channel blocks it b/c value have been read already
-- write to channel in different goroutine twice, read from channel in main goroutine twice
+outcome - the second reading from the channel blocks because the value has been read already.
+- write to a channel in a different goroutine twice, and read from it in the main goroutine twice
 ```go
 func main() {
 	ch := make(chan int)
@@ -343,10 +343,10 @@ result:
 1
 2
 ```
-outcome - works as expected, two times write, two times read
-- write (unknown for reader) number of elements into channel in different goroutine, read them correctly in main goroutine.
-In real life we never know how many elements have been added into channel before it's been returned to us for pulling. However, if channel is closed 
-after writing we may use channel axiom to return zero when channel is closed to stop pulling.
+outcome - works as expected: two writes, two reads.
+- writing an unknown (for the reader) number of elements into a channel in a different goroutine, and reading them correctly in the main goroutine.
+In real life, we never know how many elements have been added into a channel before it is returned to us for pulling. However, if a channel is closed 
+after writing, we may use the channel axiom that returns the zero value when a channel is closed to stop pulling.
 ```go
 func writer() chan int {
 	ch := make(chan int)
@@ -354,7 +354,7 @@ func writer() chan int {
 		for i := range 5 {
 			ch <- i
 		}
-		close(ch) // close channel after all data have been written
+		close(ch) // close channel after all data has been written
 	}()
 	return ch
 }
@@ -364,7 +364,7 @@ func main() {
 	for { // infinite loop
 		v, ok := <-ch
 		if !ok {
-			break // break loop when got 0 from closed channel
+			break // break loop when the channel is closed
 		}
 		fmt.Println(v)
 	}
@@ -378,20 +378,20 @@ result:
 3
 4
 ```
-In addition, as a good practice would be make return channel as **read-only** channel (see <- before chan definition on return) - `func writer() <-chan int {`.
-That will give context to go compiler to highlight possible errors on close operation in compile time. Example:
+In addition, it's good practice to return the channel as a **read-only** channel (see the `<-` before `chan` in the return definition) - `func writer() <-chan int {`.
+That will allow the Go compiler to highlight possible errors during the close operation at compile time. Example:
 ```ascii
 Cannot use ch (type <-chan int) as the type chan<- Type
 Must be a bidirectional or send-only channel
 ```
-Channel will be converted to read-only channel only after leaving function, you still can write values into channel inside of function. 
+The channel will be converted to a read-only channel only after leaving the function; you can still write values into the channel inside the function. 
 
 ## Basic Go channel patterns
 
 ### Generator
-If function creates channel / writes into channel and returns after channel for reading we call this pattern **Generator**.
-Function between creating of channel and returning it out MUST NOT have any blocking operation - all operations must be run in goroutine.
-**Generator** uses two goroutines to write into channel
+If a function creates a channel, writes into it, and returns the channel for reading, we call this pattern a **Generator**.
+The code between creating the channel and returning it MUST NOT have any blocking operations - all operations must be run in a goroutine.
+The following **Generator** uses two goroutines to write into the channel:
 ```go
 func generate() <-chan int {
 	ch := make(chan int)
@@ -431,9 +431,9 @@ result:
 3
 4
 ```
-outcome: we have incorrect result b/c first goroutine finishes first and closes channel. 
+outcome: We have an incorrect result because the first goroutine finishes first and closes the channel. 
 
-In addition to we have a race condition what can cause panic on the closed channel. Let's make a sleep in the end of main to wait until second goroutine will try to write into closed channel:
+In addition, we have a race condition that can cause a panic on the closed channel. Let's add a sleep at the end of `main` to wait until the second goroutine tries to write into the closed channel:
 ```go
 func generate() <-chan int {
 	ch := make(chan int)
@@ -476,7 +476,7 @@ result:
 4
 panic: send on closed channel
 ```
-Let's make "Generator" to use two goroutines to write into channel with correct closing of channel synced with `WaitGroup`:
+Let's modify the "Generator" to use two goroutines to write into the channel, with the correct closing of the channel synchronized with a `WaitGroup`:
 ```go
 func writer() <-chan int {
 	ch := make(chan int)
@@ -532,13 +532,13 @@ result:
 
 ----
 
-Note: since in according to **generator** pattern, we must not have any blocking operations in the function, we wrap up `wg.Wait()`/`close(ch)` into separate goroutine as well.
+Note: Since, according to the **generator** pattern, we must not have any blocking operations in the function, we wrap up `wg.Wait()`/`close(ch)` into a separate goroutine as well.
 
 ----
 
 ### range
 
-We do not need to use construct to pull values and break on zero when channel is closed:
+We do not need to use a loop to pull values and break when the channel is closed:
 ```go
 for {
     v, ok := <-ch
@@ -548,16 +548,16 @@ for {
 	...
 }
 ```
-We can just use a `range` on the channel to pull from it as:
+We can just use `range` on the channel to pull from it:
 ```go
 for v := range ch {
     fmt.Println(v)
 }
 ```
-In case of using range you MUST close a channel, or you will get deadlock.
+When using `range`, you MUST close the channel, or you will get a deadlock.
 
 ## Select
-Let's make a simplest _select_ program and run it:
+Let's make a simple _select_ program and run it:
 ```go
 func main() {
 	select {}
@@ -567,9 +567,9 @@ result:
 ```ascii
 fatal error: all goroutines are asleep - deadlock!
 ```
-As you may see - **select** is a **blocking** operator.
+As you can see, **select** is a **blocking** operator.
 
-Select allows you to read from either one channel - using select you can make a switch between channels (see link [5]).
+`select` allows you to read from multiple channels; it acts like a switch for channels (see link [5]).
 ```go
 func main() {
 	ch1 := make(chan int)
@@ -583,8 +583,8 @@ func main() {
 	}
 }
 ```
-If we run this program now we will get deadlock b/c `select`will iterate through all blocking operations (two in our case) and check they all blocked and throws deadlock (b/c no any writer to corresponding channel).
-Let's write into one channel any value:
+If we run this program now, we will get a deadlock because `select` will iterate through all blocking operations (two in our case), check that they are all blocked, and throw a deadlock (because there is no writer for either channel).
+Let's write a value into one of the channels:
 ```go
 func main() {
 	ch1 := make(chan int)
@@ -608,10 +608,10 @@ ch1:  1
 
 Process finished with the exit code 0
 ```
-so we printed value and exited program what means - `select` **works one time** and get **case first which was unlocked first**. 
-If we unlocked first channel 1, `select` reads from channel 1 and exited select.
+The program printed the value and exited, which means `select` **works once** and executes the **first case that becomes unlocked**. 
+If the first channel is unlocked first, `select` reads from it and exits.
 
-How to make `select` non-blocking? We can define `default` on the select to make it non-blocking:
+How to make `select` non-blocking? We can define a `default` case to make it non-blocking:
 ```go
 func main() {
 	ch1 := make(chan int)
@@ -654,20 +654,20 @@ func main() {
 	}
 }
 ```
-Do we assume to get result as correct?
+Would we expect the result to be?
 ```ascii
 ch1:  1
 
 Process finished with the exit code 0
 ```
-However, we're really getting again:
+However, we actually get:
 ```ascii
 select is non-blocking now
 
 Process finished with the exit code 0
 ```
-B/c our goroutine was not put scheduler for a run before program is exited. To make this program working as expected we can just put Sleep in front of `select`.
-That will goroutine and get result as we expect:
+Because our goroutine was not scheduled to run before the program exited. To make this program work as expected, we can put a `Sleep` before the `select`.
+That will allow the goroutine to run and produce the expected result:
 ```go
 func main() {
 	ch1 := make(chan int)
@@ -694,7 +694,7 @@ ch1:  1
 
 Process finished with the exit code 0
 ```
-If we want to leave `select` not by `default` but by timeout we can use `time.After` in the case:
+If we want to exit `select` not by `default` but by timeout, we can use `time.After`:
 ```go
 func main() {
 	ch1 := make(chan int)
@@ -715,7 +715,7 @@ timeout
 
 Process finished with the exit code 0
 ```
-We also can leave by timer:
+We can also exit using a timer:
 ```go
 func main() {
 	ch1 := make(chan int)
@@ -739,7 +739,7 @@ timer expired
 
 Process finished with the exit code 0
 ```
-Leave by context:
+Exit by context:
 ```go
 func main() {
 	ch1 := make(chan int)
@@ -764,7 +764,7 @@ timeout
 Process finished with the exit code 0 
 ```
 
-How all three `after`/`timer`/`context` work? They use a same pattern to close channel after meeting some condition. Let's make our custom `After`:
+How do all three (`after`, `timer`, `context`) work? They use the same pattern: closing a channel when a condition is met. Let's create our own custom `After`:
 ```go
 func main() {
 	ch1 := make(chan int)
@@ -793,9 +793,9 @@ ch3:  3
 Process finished with the exit code 0
 ```
 
-What the best way to leave `select`? **CONTEXT**
+What is the best way to exit a `select`? **CONTEXT**
 
-Let's consider a simple program  with `select`:
+Let's consider a simple program with `select`:
 ```go
 func main() {
 	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Millisecond)
@@ -822,9 +822,9 @@ func main() {
 	}
 }
 ```
-program creates channel, writes N values into it and await processing with a `select` or exit by context cancellation. However context cancellation itself does not
-cancel goroutine what create **goroutine leak**.
-To avoid let's also propagate context cancellation through `select` into goroutine.
+The program creates a channel, writes N values into it, and awaits processing with a `select` or exits via context cancellation. However, context cancellation itself does not
+cancel the goroutine, which creates a **goroutine leak**.
+To avoid this, let's also propagate the context cancellation through `select` into the goroutine:
 ```go
 func main() {
 	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Millisecond)
@@ -855,7 +855,7 @@ func main() {
 	}
 }
 ```
-you can run both code snippets to see the difference.
+You can run both of these code snippets to see the difference.
 
 **Problems to exercise** (see full list below):
 - `pipeline`
@@ -865,7 +865,7 @@ you can run both code snippets to see the difference.
 - `processdata_with_context`
 
 ## Buffered channels
-Uber Go style guide dictates to not use buffered channels (see ref [7] below):
+The Uber Go style guide recommends not using buffered channels (see ref [7] below):
 ```ascii
 Channel Size is One or None
 
@@ -873,7 +873,7 @@ Channels should usually have a size of one or be unbuffered. By default, channel
 Any other size must be subject to a high level of scrutiny. Consider how the size is determined, what prevents the channel 
 from filling up under load and blocking writers, and what happens when this occurs.
 ```
-Bad	by Uber style guide:
+Bad by Uber style guide:
 ```go
 // Ought to be enough for anybody!
 c := make(chan int, 64)
@@ -887,11 +887,11 @@ c := make(chan int, 1) // or
 c := make(chan int)
 ```
 
-Buffered channel works as unbuffered channel except:
-- **WRITE LOCK** on the channel happens only when **BUFFER** is **FULLY FILLED**
-- **READ LOCK** on the channel happens when **BUFFER** is **EMPTY**
+A buffered channel works like an unbuffered channel except:
+- **WRITE LOCK** on the channel happens only when the **BUFFER** is **FULL**
+- **READ LOCK** on the channel happens when the **BUFFER** is **EMPTY**
 
-Buffered channel does not have any OTHER LOCKS what means we do not have synchronization. Buffered channel does not make a Join point as it does unbuffered channel:
+A buffered channel does not have any OTHER LOCKS, which means we do not have synchronization. A buffered channel does not create a Join point in the same way an unbuffered channel does:
 ```ascii
         fork->
               \
@@ -900,7 +900,7 @@ g0(main) ----> go g1 --------> println ----> exit
                 g1 --------------------------------> println
 ```
 
-Let's make a simple program with unbuffered channel:
+Let's consider a simple program with an unbuffered channel:
 ```go
 func main() {
 	ch := make(chan int)
@@ -919,14 +919,15 @@ func main() {
 }
 ```
 result:
-```ascii1
+```ascii
+1
 2
 3
 
 Process finished with the exit code 0
 ```
 
-Now let's change unbuffered to buffered with a size 3:
+Now let's change the unbuffered channel to a buffered one with a size of 3:
 ```go
 func main() {
 	ch := make(chan int, 3)
@@ -948,8 +949,8 @@ result:
 
 Process finished with the exit code 0
 ```
-As you may see synchronization is no longer working expected for unbuffered channel way. Since writer had enough slots to fill up buffer it's not blocked itself and exited program before scheduler put reading goroutine to work.
-If we add sleep in the end of program or increase number of buffer and writes into buffer program will read all or part of data:
+As you can see, synchronization is no longer working as it does with unbuffered channels. Since the writer had enough slots to fill up the buffer, it was not blocked and the program exited before the scheduler could run the reading goroutine.
+If we add a sleep at the end of the program or increase the buffer size and writes, the program will read all or part of the data:
 ```go
 func main() {
 	ch := make(chan int, 10000)
@@ -977,8 +978,8 @@ func main() {
 Why would we need a buffered channel? 
 
 **Buffered channels are non-blocking for the sender as long as there's still room. This can increase responsiveness and throughput. 
-Sending several items on one buffered channel makes sure they are processed in the order in which they are sent.**
-As example:
+Sending several items on a buffered channel ensures they are processed in the order in which they were sent.**
+Example:
 ```go
 func main() {
 	ch := make(chan int, 3)
@@ -1004,9 +1005,9 @@ func main() {
 ```
 
 ## Goroutine leaks
-Goroutine leak happens when result of goroutine work no longer need but goroutine keeps working and consume memory and CPU and other resources. 
+A goroutine leak happens when the result of a goroutine's work is no longer needed, but the goroutine keeps working and consuming memory, CPU, and other resources. 
 
-Let's make a simple example of goroutine leak:
+Let's look at a simple example of a goroutine leak:
 ```go
 func leakyG() {
 	go func(){
@@ -1014,10 +1015,10 @@ func leakyG() {
     }
 }
 ```
-The goroutine from example would never be finished.
+The goroutine in this example will never finish.
 
-Let's look on the example with "forgotten" reader / writer.
-Here is initial example:
+Let's look at an example with a "forgotten" reader/writer.
+Initial example:
 ```go
 func main() {
 	ch := make(chan int)
@@ -1041,15 +1042,15 @@ func main() {
 	time.Sleep(1 * time.Second)
 }
 ```
-run and:
+result:
 ```ascii
 read 0
 read 1
 writer is done
 read 2
 ```
-Writer is exited but reader is not b/c we did not close channel after writing.
-Let's address it:
+The writer has exited, but the reader has not because we did not close the channel after writing.
+Let's fix it:
 ```go
 func main() {
 	ch := make(chan int)
@@ -1074,7 +1075,7 @@ func main() {
 	time.Sleep(1 * time.Second)
 }
 ```
-and run:
+result:
 ```ascii
 read 0
 read 1
@@ -1082,9 +1083,9 @@ writer is done
 read 2
 reader is done
 ```
-Great, now both are exited.
+Great, now both have exited.
 
-Now let's emulate issue on the reader goroutine:
+Now let's emulate an issue in the reader goroutine:
 ```go
 func main() {
 	ch := make(chan int)
@@ -1093,7 +1094,7 @@ func main() {
 	go func() {
 		defer fmt.Println("writer is done")
 		for i := range 3 {
-			ch <- i // oh, no writer is blocked now
+			ch <- i // oh no, writer is blocked now
 		}
 		close(ch)
 	}()
@@ -1115,7 +1116,7 @@ result:
 read 0
 reader is done
 ```
-Writer goroutine is leaked now. To avoid we can add cancellation context as we did before to prevent this:
+The writer goroutine is now leaked. To avoid this, we can add a cancellation context as we did before:
 ```go
 func main() {
 	ch := make(chan int)
@@ -1155,7 +1156,7 @@ read 0
 reader is done
 writer is done
 ```
-Nice, both goroutines are exited as we expect now. but what if we get a error on the writer now?
+Nice, both goroutines have exited as expected. But what if we get an error in the writer?
 ```go
 func main() {
 	ch := make(chan int)
@@ -1192,8 +1193,8 @@ result:
 writer is done
 read 0
 ```
-Now leak on the reader! that's b/c our was not closed yet - we close on the end of writer goroutine.
-If we do closing with _defer_ we can avoid this problem
+Now there's a leak in the reader! That's because our channel was not closed yet - we only close it at the end of the writer goroutine.
+If we use `defer` for closing, we can avoid this problem:
 ```go
 func main() {
 	ch := make(chan int)
@@ -1235,7 +1236,7 @@ reader is done
 
 ----
 
-Note: use **defer** all time to close channel if it is possible.
+Note: Use **defer** to close channels whenever possible.
 
 ----
 
@@ -1244,28 +1245,28 @@ Note: use **defer** all time to close channel if it is possible.
 
 ## Problems to exercise
 - _Easy_ [Go concurrency bare minimum] `concstart` - You have a function running between 0 and N seconds. Run this function concurrently M times
-and print out how many seconds runs main and how many seconds run all functions in parallel.
+and print out how many seconds the main function runs and how many seconds all functions run in parallel.
     - Solution 1 (with `WaitGroup`) - `./concstart/wg/main.go`
     - Solution 2 (with `channel`) - `./concstart/ch/main.go`
-- _Medium_ [Go channel axioms] `pipeline` - Make 3 functions: _writer_ - generates numbers from 0 to 20, _doubler_ - multiplies numbers on 2 with sleep of 500ms simulating some IO-bound work,
-_reader_ - reads and prints out on the screen. All functions must be implemented concurrent way and synced accordingly.
+- _Medium_ [Go channel axioms] `pipeline` - Create 3 functions: _writer_ - generates numbers from 0 to 20; _doubler_ - multiplies numbers by 2 with a sleep of 500ms simulating some IO-bound work;
+_reader_ - reads and prints out on the screen. All functions must be implemented in a concurrent way and synchronized accordingly.
     - Solution: `./pipeline/main.go`
-- _Easy_ [Go channel axioms] `nworkers` - Create channel and create M goroutine (2,3,4...) writing into channel, then create N different goroutines (2,3,4...) reading from the channel.
+- _Easy_ [Go channel axioms] `nworkers` - Create a channel and create M goroutines (2,3,4...) writing into it, then create N different goroutines (2,3,4...) reading from the channel.
     - Solution: `./nworkers/main.go`
-- _Easy_ [Go channel axioms] `longrunner` - You have a function with undefined behavior - it can work in the range between 1 and 100 seconds. make a wrapper for this function
-to break execution if it takes more than 3 seconds and return error.
+- _Easy_ [Go channel axioms] `longrunner` - You have a function with undefined behavior - it can take between 1 and 100 seconds. Create a wrapper for this function
+to break execution if it takes more than 3 seconds and return an error.
     - Solution 1 (with `time.After`): `./longrunner/after/main.go`
     - Solution 2 (with context): `./longrunner/context/main.go`
-- _Medium_ [Go channel axioms] `processdata` - You have a function to process data which for simplicity takes an integer number K and returns K * 2 after some wait (let's say it awaits between 0 and 10 seconds).
- Write data (10 numbers as example) into some buffer concurrently and then process data in parallel with N number of workers.
+- _Medium_ [Go channel axioms] `processdata` - You have a function to process data which, for simplicity, takes an integer K and returns K * 2 after some wait (let's say it waits between 0 and 10 seconds).
+ Write data (10 numbers as an example) into a buffer concurrently and then process the data in parallel with N workers.
     - Solution: `./processdata/main.go`
-- _Hard_ [Go channel axioms] `processdata_with_context` - You have a function to process data which for simplicity takes an integer number K and returns K * 2 after some wait (let's say it awaits between 0 and 10 seconds). 
-write data (10 numbers as example) into some buffer concurrently and then process data in parallel with N number of workers, every process should run no longer than M seconds (5 by example) and print out time of execution.
-Please implement possible cancellation with timeout context.
+- _Hard_ [Go channel axioms] `processdata_with_context` - You have a function to process data which, for simplicity, takes an integer K and returns K * 2 after some wait (let's say it waits between 0 and 10 seconds). 
+Write data (10 numbers as an example) into a buffer concurrently and then process the data in parallel with N workers. Each process should run no longer than M seconds (5 by example) and print out the execution time.
+Please implement cancellation using a timeout context.
     - Solution: `./processdata_with_context/main.go`
-- _Medium_ [Advanced channel patterns] _tee pattern_ - Implement "tee" pattern - function what has one channel as input and N (same as an input one) channels as output. Please implement possible cancellation with timeout context.
+- _Medium_ [Advanced channel patterns] _tee pattern_ - Implement the "tee" pattern - a function that has one input channel and N output channels (identical to the input). Please implement cancellation using a timeout context.
   - Solution: `./tee/main.go`
-- _Hard**_ [Advanced channel patterns] `fanin_fanout_workerpool` - Implement fan-in / fan-out and work pool both with context cancellation. Using metrics show advantage one above other if such as advantage is exist.
+- _Hard**_ [Advanced channel patterns] `fanin_fanout_workerpool` - Implement fan-in / fan-out and a worker pool, both with context cancellation. Using metrics, show the advantage of one over the other, if such an advantage exists.
     - Solution: `./fanin_fanout_workerpool/cmd/main.go`
 
 ## References
